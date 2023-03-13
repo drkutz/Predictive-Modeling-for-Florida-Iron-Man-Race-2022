@@ -1,0 +1,400 @@
+---
+title: "Final Project 3"
+author: "Adam Gruber"
+date: '`r Sys.Date()`'
+output: word_document
+---
+
+
+
+```{r include=FALSE}
+library(ggplot2)
+library(readr)
+library(DescTools)
+library(lubridate)
+library(dplyr)
+library(knitr)
+library(GGally)
+library(rmeta)
+library(leaps)
+library(car)
+library(broom)
+```
+                            Intro
+
+Our Goal is to predict the second year performance of Triathlon athletes based on their times in 2020. This required several transformations for the data to find all the people that participated in both years as well as taking the data from being granular to ready to use.   There are considerable more partcipants in the year 2021 compared to 2020. 1680 vs 1133. That is a 48% increase. This is likely due to poor turn out from Covid 19. Considering this study needs people to repeat the Triathlon in order to make test and make accurate predictions, we will likely need to repeat this study using 2022 and 2023 in order to build a proper model. Our best refined model shows adjusted r squared of .766 for predicting the overall times.  Our secondary goal of determining if there is an improvement in overall times when comparing first time and repeat participants is inconclusive, showing little time differences between the groups.   
+
+```{r pressure, include=FALSE}
+IM_Florida_20 <- read_csv("C:/Users/adam/Documents/DS 705/final project 3/IM_Florida_20.csv", 
+    col_types = cols(OverallTime = col_character(), 
+        SwimTime = col_character(), BikeTime = col_character(), 
+        RunTime = col_character()))
+
+IM_Florida_21 <- read_csv("C:/Users/adam/Documents/DS 705/final project 3/IM_Florida_21.csv", 
+    col_types = cols(OverallTime = col_character(), 
+        SwimTime = col_character(), BikeTime = col_character(), 
+        RunTime = col_character(), FinishStatus = col_character()))
+```
+
+ 
+
+
+
+```{r include=FALSE}
+IM_Florida_20$SwimTime_20 <- hms(IM_Florida_20$SwimTime)
+IM_Florida_21$SwimTime_21 <- hms(IM_Florida_21$SwimTime)
+IM_Florida_20$BikeTime_20 <- hms(IM_Florida_20$BikeTime)
+IM_Florida_21$BikeTime_21 <- hms(IM_Florida_21$BikeTime)
+IM_Florida_20$RunTime_20 <- hms(IM_Florida_20$RunTime)
+IM_Florida_21$RunTime_21 <- hms(IM_Florida_21$RunTime)
+IM_Florida_20$Overall_time_20 <- hms(IM_Florida_20$OverallTime)
+IM_Florida_21$Overall_time_21 <- hms(IM_Florida_21$OverallTime)
+#2020
+IM_Florida_20$swim_min_20 = ifelse(hour(IM_Florida_20$SwimTime_20) > 5, hour(IM_Florida_20$SwimTime_20) + minute(IM_Florida_20$SwimTime_20)/60, hour(IM_Florida_20$SwimTime_20)*60 + minute(IM_Florida_20$SwimTime_20) + second(IM_Florida_20$SwimTime_20)/60)
+
+
+IM_Florida_20$Transition_time_20 <- ((as.numeric(IM_Florida_20$Overall_time_20) - as.numeric(IM_Florida_20$BikeTime_20)- as.numeric(IM_Florida_20$RunTime_20))/60) - IM_Florida_20$swim_min_20
+
+#2021
+IM_Florida_21$swim_min_21 = ifelse(hour(IM_Florida_21$SwimTime_21) > 5, hour(IM_Florida_21$SwimTime_21) + minute(IM_Florida_21$SwimTime_21)/60, hour(IM_Florida_21$SwimTime_21)*60 + minute(IM_Florida_21$SwimTime_21) + second(IM_Florida_21$SwimTime_21)/60)
+
+IM_Florida_21$Transition_time_21 <- ((as.numeric(IM_Florida_21$Overall_time_21) - as.numeric(IM_Florida_21$BikeTime_21)- as.numeric(IM_Florida_21$RunTime_21))/60) - IM_Florida_21$swim_min_21
+
+IM_Florida_20 <-na.omit(IM_Florida_20, cols = "Transition_time_20")
+IM_Florida_21 <-na.omit(IM_Florida_21, cols = "Transition_time_21")
+```
+
+Creating the age groups
+
+I created a separate age group variable. This variable was created from the Division Variable. This Variable lacks the age for people who were Professional competitors. This means we are lacking age for professionals, but these could be replaced with the median, or mode. A table of our participants shows the age skews to the higher end. If we used mode, the age of professionals would be replaced with 50-54 category.  This seems a bit unrealistic to expect most of the professionals to be a bit older. Natural inclination is professionals would be young and at peak  fitness, but without further proof of age I choose to remove the 33 professionals from the 2020 data set. PC means physically challenged and those 4 were removed as well for similar reasons from 2020 Raw Data Set. The 2021 Raw data set had 5 unknown. Those removed as well. This was the only way to ensure our data was as accurate as possible. 
+
+
+
+```{r echo=FALSE}
+IM_Florida_20$AgeGroup <- substr(IM_Florida_20$Division, 2,6)
+IM_Florida_21$AgeGroup <- substr(IM_Florida_21$Division, 2,6)
+
+IM_Florida_20$AgeGroup <- as.factor(IM_Florida_20$AgeGroup)
+IM_Florida_21$AgeGroup <- as.factor(IM_Florida_21$AgeGroup)
+
+#table(IM_Florida_20$AgeGroup)
+#table(IM_Florida_21$AgeGroup)
+
+rows_cut = c("PRO")
+subset_20 <- subset(IM_Florida_20, AgeGroup != "PRO")
+subset_21 <- subset(IM_Florida_21, AgeGroup != rows_cut)
+
+#kable(table(subset_20$AgeGroup), caption = "2020 Age Groups")
+#kable(table(subset_21$AgeGroup), caption = "2021 Age Groups" )
+
+
+
+#knn_impute( target = IM_Florida_20['AgeGroup'],  IM_Florida_20, cl = AgeGroup, k = 5)
+
+#knn_impute(IM_Florida_20, k= 3, cat.var = AgeGroup, to.impute = AgeGroup['PRO'])
+```
+Joining the Data Frames
+
+The data from 2020 triathlon and 2021 were combined together in one data frame.  The data was joined by using the name of the participants, assuming name did not change. We were unable to use other variables to join the data set because they also change. For example, bib number, country, or rank.  For example there are 6 participants in our refined data set that changed country. All of them were recorded as having moved to the USA. This seems it could have possibly been poor data collection or all of them did come from outside the USA and moved in the past year. Using the Name could potentially lead to issues since people might legally change their name for a variety of reasons such as : marriage, divorce,  changing self identification. 
+
+Another example is changing ages. Inaccurate measurements or natural aging process can cause a change in the Age category. I checked the ages for our participants. I was looking for any people that aged backwards since this likely represented clerical errors that could lead to inaccurate regression.  I found "Kevin Young", and he was removed. 
+```{r echo=FALSE}
+data <- inner_join(subset_20, subset_21, by = "Name")
+
+Changing_country <- subset(data, Country.x != Country.y)
+chaning_age <- subset(data, AgeGroup.x != AgeGroup.y)
+#kable(table(Changing_country$Name,Changing_country$Country.x), caption = "Changing Country")
+changing_gender <- subset(data, Gender.x != Gender.y)
+data <- subset(data, Name != "Kevin Young")
+
+
+```
+
+Our goal is to predict the 2021 performance of participants based on their times in 2020. I graphed this using ggpairs to show what linear correlation there might be in various scatter plots. 
+```{r echo=FALSE}
+#ggpairs(data = data, columns = 15:19)
+
+
+
+
+IM_Florida_21$Transition_time_21 <- ((as.numeric(IM_Florida_21$Overall_time_21) - as.numeric(IM_Florida_21$BikeTime_21)- as.numeric(IM_Florida_21$RunTime_21))/60) - IM_Florida_21$swim_min_21
+
+data$SwimTime_20 <- ((as.numeric(data$SwimTime_20)/60)) 
+data$RunTime_20 <- (as.numeric(data$RunTime_20)/60)
+data$BikeTime_20 <-(as.numeric(data$BikeTime_20)/60)
+data$Overall_time_20 <- (as.numeric(data$Overall_time_20)/60)
+data$Overall_time_21 <- (as.numeric(data$Overall_time_21)/60)
+pairs_chart <-data.frame( data$swim_min_20, data$RunTime_20, data$BikeTime_20, data$Overall_time_21, data$Gender.x )
+#data = rename(data, AgeGroup = AgeGroup.x)
+pairs_chart = rename(pairs_chart, Overall_time_21 = data.Overall_time_21)
+pairs_chart = rename(pairs_chart, SwimTime_2020 = data.swim_min_20)
+pairs_chart = rename(pairs_chart, RunTime_2020 = data.RunTime_20)
+pairs_chart = rename(pairs_chart, BikeTime_2020 = data.BikeTime_20)
+#pairs_chart
+genders <- pairs_chart[,5]
+l <- length(unique(genders))
+#pairs(pairs_chart [1:4], pch = 19, cex =.5, col = hcl.colors(l, "Temps")[genders], lower.panel = NULL)
+
+#pairs(pairs_chart [1:4], pch = 19, lower.panel = NULL, bg = c("red", "blue")[unclass(pairs_chart$data.Gender.x)])
+
+#ggpairs(pairs_chart, columns = 1:4, ggplot2::aes(colour = data.Gender.x))
+```
+Looking at the overall differences in general, the Overall time for most athletes that completed both triathlons were similar. This may show a slight improvement over time but the mean time increased from 13 Hours  7 Minutes to 13 Hours 35 Minutes. The graphs Bike time and run time have a positive slope when graphed against Overall Time from 2021, showing at least a positive relationship. There appears to be a strong correlation between Bike Time in 2020,Run Time in 2020  and 2021 over all times. A correlation means  at .743 of the Overall time can be explained by the Bike Time in 2020.  
+
+When comparing the genders the female graph is more normal compared to the male graph. The male chart has more outliers on both ends. 
+
+```{r echo=FALSE, warning=FALSE, paged.print=TRUE}
+#kable(
+#summary(data$Overall_time_20), caption = "2020 Overall Time Stats")
+#kable(summary(data$Overall_time_21), caption = "2021 Overall Time Stats")
+#Price_Average <- data.frame( "Price CH"=c(1.867),"Price MM" = c(2.085), "Sale Price MM" = c(1.962), "Sale Price CH" = #c(1.816), "Price Difference" = c(.1465))
+
+#kable(Price_Average, caption = "Price Averages")
+
+Overall_stats <- data.frame( "Year" = c(2020,2021), "Min" = c("9 H 1 M", "9 H 18 M"), "Median" = c("13 H 10 M", "13 H 34 M"), "Mean" = c("13 H 7 M","13 H 35 M"), "Max" = c("17 H 22 M","16 H 55 M"))
+
+kable(Overall_stats, caption =" Overall Time")
+```
+                                    Univariate Models
+
+To predict the overall time for 2021 we created 4 prediction models based on the time for 2020. One based on each of the following : Swim Time, Run Time, Bike Time, Transition Time.  
+
+Each model had the P value listed as a significant term, which there was only one deciding variable for the model. Each Model varied in its R squared value. R squared shows the the proportion of Overall time that can be explained by the model. The bike model shows the highest r squared value and that it best explains the 2021 Overall Times. 
+
+When building a model that uses all 4 variables(All_Variables Model), it has the highest R squared value, of 0.7168. This indicates that any one variable is insufficient to properly explain the 2021 over all times.  This likely comes from participants having strengths and weaknesses in each event. Each event requires different skill sets. SO taking the performance of any one person in one event can can be unreliable when trying to predict their total time for 3 events. Predicting their overall time makes more sense when factoring in all events. 
+
+The All variables model was also tested to see if Gender was a significant factor for a linear model. It was not. The associated P value for gender was 0.119442 which means it is not significant for predicting/explaining the 2021 Overall Times.  
+
+```{r include=FALSE}
+swim_mod <- lm(Overall_time_21~ SwimTime_2020, data = pairs_chart)
+summary(swim_mod)
+```
+
+```{r include=FALSE}
+run_mod <- lm(Overall_time_21 ~ RunTime_2020, data = pairs_chart)
+summary(run_mod)
+```
+
+
+
+```{r include=FALSE}
+bike_mod <- lm(Overall_time_21 ~ BikeTime_2020, data = pairs_chart)
+summary(bike_mod)
+```
+
+```{r include=FALSE}
+transition_mod <- lm(Overall_time_21 ~ Transition_time_20, data = data)
+summary(transition_mod)
+```
+
+
+```{r include=FALSE}
+all_variables <- lm(Overall_time_21 ~ Transition_time_20 + swim_min_20+ BikeTime_20+ RunTime_20, data = data)
+summary(all_variables)
+```
+
+
+
+
+```{r echo=FALSE, paged.print=TRUE}
+rsqaured<-(cbind(Swim_model = summary(swim_mod)$r.squared, Run_model = summary(run_mod)$r.squared, Bike_model = summary(bike_mod)$r.squared, Transition_model = summary(transition_mod)$r.squared, All_Variables = summary(all_variables)$r.squared))
+
+kable(rsqaured, caption =" R Squared Comparision")
+```
+
+```{r echo=FALSE, paged.print=TRUE}
+#confint(bike_mod)
+#confint(run_mod)
+#confint(swim_mod)
+#confint(transition_mod)
+
+forest_frame <- data.frame( Models = c("Swim", "Run", "Bike", "Transition"), Index = 1:4,
+                            Slope = c(5.8977,  1.434142, 2.03795, 8.8290),
+                            Lower = c(4.743082, 1.21950972, 1.747571411, 7.078081),
+                            Upper = c(7.052335, 1.6487739, 2.32833364, 10.5799))
+
+kable(forest_frame, caption = "Confidence Intervals by Model")
+```
+
+```{r echo=FALSE}
+
+#forestplot(labeltext = c(forest_frame$models),
+#           #xlab = "Slope with Confidence Interval",
+#           mean = forest_frame$slope,
+#           lower = forest_frame$lower,
+#           upper = forest_frame$upper)
+
+
+ggplot(data = forest_frame, aes(y = Index, x = Slope, xmin = Lower, xmax = Upper))+
+  geom_point()+
+  geom_errorbarh(height =.1)+
+  scale_y_continuous(breaks = 1:nrow(forest_frame), labels = forest_frame$Models)+
+  labs( title = 'Slope with Confidence Intervals by Models', x = 'Slope Size', y = 'Models')+
+  theme_classic()
+
+
+```
+The Confidence intervals for slope of Swim Time, and Transition time are much wider than the Confidence Intervals for Bike and Run Time. This is reflected in r squared values as well. All the r squared values are positive with bike and run showing the strongest correlation. The Transition Model and the Swim Model have very steep slopes, meaning as for every one minute increase in transition time, there is a 8.829 increase in overall time. This can be reflective of the overall size of transition time being smaller. The difference between max and min is 35.1 minutes. Difference between max and min run time is 299 minutes. Difference between max and min overall time is 457 minutes, and this means the difference 35 minute difference in transition time is trying to explain a 457 minute difference in over all time. Compare that to Run time that has a time difference of 299 minutes trying to explain the 457 minute difference in overall time. The slope will be more gradual for each unit increase in run time. 
+
+Using Single Variable models, our current best model is the Bike model. 
+
+```{r eval=FALSE, include=FALSE}
+all_variablesgender <- lm(Overall_time_21 ~ Transition_time_20 + swim_min_20+ BikeTime_20+ RunTime_20 +Gender.x, data = data)
+summary(all_variablesgender)
+
+summary(pairs_chart)
+
+max(data$Transition_time_20)
+min(data$Transition_time_20)
+```
+
+                                  Multivariate models
+                                  
+When adding Age group as a factor it can vary wildly for how it will interact with prediction model. Age is a factorial variable with 11 potential levels. Since we are looking at only those that had an overall time for both 2021 and 2020, there are not participants in all the age groups.  Age as a variable has a negative coefficient as the age continues to increase. 
+
+
+```{r echo=FALSE}
+data = rename(data, AgeGroup = AgeGroup.x)
+single_model <- lm(Overall_time_21 ~ (Transition_time_20 + swim_min_20+ BikeTime_20+ RunTime_20 + AgeGroup), data = data)
+#kable(coef(single_model), caption = "Coefficients for Simple Model")
+```
+To find the best possible model, created several different models and then compared them. 
+
+The simple model predicts Overall_time_21 based on Transition_time_20 + swim_min_20+ BikeTime_20+ RunTime_20 + AgeGroup.
+
+The summary showed all variables were significant based on their P-value.
+
+The interaction model used the same variables but looked at each variable and compared it against each age group.The summary of this model checks each age group if they are significant based on their P-value. After checking none of the variables were considered significant by themselves since their were  60 + variables. 
+
+The refined model was created using the forward step wise function . Step wise created the best model based on AIC. The stepwise function started at a null model that predicted Overall Time 21 based on the increase of 1. The Stepwise then added variables until it arrived at  
+
+Overall_time_21 predicted by BikeTime_20 + RunTime_20 + swim_min_20 + AgeGroup + Transition_time_20 + BikeTime_20:swim_min_20 + RunTime_20:AgeGroup
+
+The 3 models were then compared based on their Adjusted R squared, AIC, and BIC. 
+
+```{r include=FALSE}
+
+
+#Salary_null = lm(sqrt(Salary)~1, data = salary_gender)
+
+model_null = lm(Overall_time_21 ~1, data = data)
+interactive_mod <- lm(Overall_time_21 ~ (Transition_time_20 + swim_min_20+ BikeTime_20+ RunTime_20 + AgeGroup)^2, data = data)
+step(model_null, scope = list(lower = model_null, upper = interactive_mod), direction = "forward")
+
+#summary(interactive_mod)
+#anova(interactive_mod)
+```
+
+
+
+```{r echo=FALSE, paged.print=TRUE}
+
+refined_model <- lm(Overall_time_21 ~ BikeTime_20 + RunTime_20 + swim_min_20 + AgeGroup + 
+    Transition_time_20 + BikeTime_20:swim_min_20 + RunTime_20:AgeGroup , data = data)
+#kable(glance(single_model), caption = "Simple Model")
+#kable(glance(interactive_mod), caption = "Interaction Model")
+#kable(glance(refined_model), caption = "Refined Model")
+
+model_frame <- data.frame( Models = c("Simple", "Interactive", "Refined"),
+                            adj.r.sq = c(0.7496466, 0.7505418, 0.766051),
+                            AIC = c(1719.492, 1745.62, 1716.513),
+                            BIC = c(1768.493, 1907.937, 1793.078))
+
+kable(model_frame, caption = "Models for Overall time using Age Group")
+```
+The simple model has the best BIC since it has the lowest. The refined model has the best AIC, of course since its the lowest. It also has the highest adjusted r squared value of .766051 meaning it has the best correlation to explain the the overall time for 2021.  Many of the variables are considered significant. Runtime by itself is not considered significant, but when runtime interacts with Age group, it  produces all significant terms in this model except for the 25-29 bracket. Gender was not chosen for the refined model as it increased the AIC score by adding additional noise to the model.    
+
+```{r echo=FALSE}
+#summary(refined_model)
+#summary(single_model)
+#kable(coef(refined_model), caption = "Refined Model Coefficients")
+```
+
+
+
+```{r echo=FALSE, warning=FALSE}
+refined_coefs = as.data.frame(confint(refined_model))
+colnames (refined_coefs) = c("lower", "upper")
+refined_coefs = refined_coefs %>% mutate(estimate = coefficients(refined_model), Term =
+row.names(refined_coefs))
+refined_coefs$index <- 1:nrow(refined_coefs)
+
+#refined_coefs
+
+
+#ggplot(data = refined_coefs[-1,], aes(y = index, x = estimate, xmin = lower, xmax = upper))+
+  #geom_point()+
+  #geom_errorbarh(height =.2)+
+  #scale_y_continuous(breaks = 1:nrow(refined_coefs), labels = refined_coefs$Term)+
+  #labs( title = 'Confidence Interval for Refined Slope ', x = 'Slope Size', y = 'Variables')+
+  #theme_classic()
+```
+
+Run time when it interacts with Age group has a very small confidence interval for each term. Each of those terms was significant in the model. Age group by itself can have wide confidence interval for the slope. This could be explained by a variety of factors such as the changing health, lifestyle, and income of the participants. The amount of time and experience they have dedicated to practicing for the Triathlon can play large factors. Income generally increases as people age. Income was not measured but would be an interesting predictor  variable of performance. 
+
+The best model to predict is:
+
+Overall_time_21 ~ Bike Time_20 + Run Time_20 + swim_min_20 + Age Group + Transition_time_20 + Bike Time_20:swim_min_20 + Run Time_20:Age Group
+
+The best model to simply explain the relationship without much loss in confidence was the Simple model 
+
+Overall_time_21 ~ Transition_time_20 + swim_min_20+ Bike Time_20+ Run Time_20 + Age Group
+
+The difference in AIC is 3. A minimal loss in prediction for increased explain ability. 
+
+The best way to reduce times compared to the reference group of age (18 - 24) is to increase in age groups. The other major variables had positive slope. Since transition time and swim times in 2020 had the largest coefficient, and  a poor time in 2020 would indicate a greater overall time in 2021. They would be categories a participant could focus on reducing in order to improve in time and potentially rank. Coefficient for Transition time and swim time are still both very small in the simple model: 1.3808  and 2.3181 respectively. They are small compared to coefficients like age group for example (25 - 29) has -218.7131 coefficient compared to (18 -24) reference group. Overall all the categories from 2020 Triathlon have a positive relationship with over all time from 2021.  As times increased in 2020, Overall 2021 time increased.  
+
+
+```{r include=FALSE}
+
+
+nonrepeat_21 <- anti_join(subset_21, data, by = 'Name')
+
+summary(nonrepeat_21)
+
+#ggplot(data = nonrepeat_21, aes(y = Transition_time_21, x = SwimTime_21  ))+
+  #geom_point()
+summary(data)
+
+815/60
+```
+Does repeat experience help predict the future times?
+
+When comparing the Overall times for those that competed both years and those that only competed in 2021, they are very similar. The mean overall time for repeats was 815 minutes. The mean overall for non repeats was 818 minutes.  The max, min, and median were both very similar on every level. This includes Run time, Swim Time, and Bike Time.  The biggest difference appears to in max times.They are slightly smaller in many of the categories like Transition Time, or bike time. Max for non repeats was 498 minutes. Max for repeats was 477 minutes. 
+The repeating the triathlon does not appear to improve the overall time significantly. This does not take into a account, the overall number of participants for 2021 is much larger than 2020. 1680 people in 2021 vs 1133 people in 2020. That is a 48 % increase. There could be many people that took off the 2020 triathlon due to events like Covid. This could lead to many former participants joining back in for 2021. This would lead to it appearing that many first time participants are quite skilled and have similar times to those repeat participants. The real solution to this would be looking back at older data from years past where there were similar number of participants or looking at future data. 
+
+
+```{r echo=FALSE}
+print('Multi Year Participants: Transition Time')
+(summary(data$Transition_time_21))# caption = 'Multi Year Participants: Transition Time')
+print("2021 only Partcipants : Transition Time")
+(summary(nonrepeat_21$Transition_time_21))# caption = "2021 only Partcipants : Transition Time")
+print('Multi Year Participants: Swim Time')
+summary(data$swim_min_21)
+print("2021 only Partcipants : Swim Time")
+summary(nonrepeat_21$swim_min_21)
+```
+
+Summary 
+
+When trying to determine explain 2021 times it was determined the uni-variate models had very little correlation individually and did not do an adequate job of explaining the overall times.  The  The multi-variate model was better able to explain the overall time for 2021 based on the 2020 times. The simple model had an adjusted r squared of .74 which was higher than any of the single variate models. This makes sense since no one activity ultimately determines the overall success. Each person may have strengths and weaknesses at each sport and this is reflected when the multi-variate model is more accurate at predicting. 
+
+There were two multivariate models that were determined to be useful. The simple model was more useful to explain the relationship between each variable. The refined model was better for actual predictions. There was only a minimal loss in correlation in r squared, Bic, or AIC. The refined model could be used for more accurate calculations when making predictions on individual competitors.
+
+The results show the best way to reduce Overall time for participants in the 18 -24 age group is to increase in age groups until reaching the 40 -44 age group when model shows the age group coefficient becomes less impactful. 
+
+Using our limited data from only two years, it appears we are able to predict the Overall time for participants when they have competed previously. When comparing our overall times, and individual event times for multi year participants and single year participants, there appears to be little variation in times when comparing max, min,mean, and median. Our current model works to predict the overall times for multi year participants but it can be improved with more data and a larger population size. Covid potentially skewed the numbers in unforseen ways and looking at a longer history of races may show more varation in Overall times and the models. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
